@@ -735,7 +735,7 @@ typedef struct
   char *cur;  /* SvPVX (sv) + current output position */
   char *end;  /* SvEND (sv) */
   SV *sv;     /* result scalar */
-  JSON json;
+  JSON *json;
   U32 indent; /* indentation level */
   UV limit;   /* escape character values >= this value when encoding */
 } enc_t;
@@ -771,7 +771,7 @@ encode_str (pTHX_ enc_t *enc, char *str, STRLEN len, int is_utf8)
 
 #if PERL_VERSION < 8
   /* perl5.6 encodes to utf8 automatically, reverse it */
-  if (is_utf8 && (enc->json.flags & F_BINARY))
+  if (is_utf8 && (enc->json->flags & F_BINARY))
     {
       str = (char *)utf8_to_bytes((U8*)str, &len);
       if (!str)
@@ -805,7 +805,7 @@ encode_str (pTHX_ enc_t *enc, char *str, STRLEN len, int is_utf8)
               *enc->cur++ = '\\';
               ++len;
             }
-          else if (UNLIKELY(ch == '/' && (enc->json.flags & F_ESCAPE_SLASH)))
+          else if (UNLIKELY(ch == '/' && (enc->json->flags & F_ESCAPE_SLASH)))
             {
               need (aTHX_ enc, 2);
               *enc->cur++ = '\\';
@@ -840,10 +840,10 @@ encode_str (pTHX_ enc_t *enc, char *str, STRLEN len, int is_utf8)
                   STRLEN clen;
                   UV uch;
 
-                  if (is_utf8 && !(enc->json.flags & F_BINARY))
+                  if (is_utf8 && !(enc->json->flags & F_BINARY))
                     {
                       uch = decode_utf8 (aTHX_ (unsigned char *)str, end - str,
-                                         enc->json.flags & F_RELAXED, &clen);
+                                         enc->json->flags & F_RELAXED, &clen);
                       if (clen == (STRLEN)-1)
                         croak ("malformed or illegal unicode character in string [%.11s], cannot convert to JSON", str);
                     }
@@ -855,7 +855,7 @@ encode_str (pTHX_ enc_t *enc, char *str, STRLEN len, int is_utf8)
 
                   if (uch < 0x80/*0x20*/ || uch >= enc->limit)
                     {
-		      if (enc->json.flags & F_BINARY)
+		      if (enc->json->flags & F_BINARY)
 			{
                           /* MB cannot arrive here */
                           need (aTHX_ enc, 4);
@@ -891,13 +891,13 @@ encode_str (pTHX_ enc_t *enc, char *str, STRLEN len, int is_utf8)
 
                       str += clen;
                     }
-                  else if (enc->json.flags & F_LATIN1)
+                  else if (enc->json->flags & F_LATIN1)
                     {
                       need (aTHX_ enc, 1);
                       *enc->cur++ = uch;
                       str += clen;
                     }
-                  else if (enc->json.flags & F_BINARY)
+                  else if (enc->json->flags & F_BINARY)
                     {
                       need (aTHX_ enc, 1);
                       *enc->cur++ = uch;
@@ -937,9 +937,9 @@ encode_const_str (pTHX_ enc_t *enc, const char *str, STRLEN len, int is_utf8)
 INLINE void
 encode_indent (pTHX_ enc_t *enc)
 {
-  if (enc->json.flags & F_INDENT)
+  if (enc->json->flags & F_INDENT)
     {
-      int spaces = enc->indent * enc->json.indent_length;
+      int spaces = enc->indent * enc->json->indent_length;
 
       need (aTHX_ enc, spaces);
       memset (enc->cur, ' ', spaces);
@@ -956,7 +956,7 @@ encode_space (pTHX_ enc_t *enc)
 INLINE void
 encode_nl (pTHX_ enc_t *enc)
 {
-  if (enc->json.flags & F_INDENT)
+  if (enc->json->flags & F_INDENT)
     {
       encode_ch (aTHX_ enc, '\n');
     }
@@ -967,9 +967,9 @@ encode_comma (pTHX_ enc_t *enc)
 {
   encode_ch (aTHX_ enc, ',');
 
-  if (enc->json.flags & F_INDENT)
+  if (enc->json->flags & F_INDENT)
     encode_nl (aTHX_ enc);
-  else if (enc->json.flags & F_SPACE_AFTER)
+  else if (enc->json->flags & F_SPACE_AFTER)
     encode_space (aTHX_ enc);
 }
 
@@ -981,7 +981,7 @@ encode_av (pTHX_ enc_t *enc, AV *av, SV *typesv)
   AV *typeav = NULL;
   HVMAX_T i, len = av_len (av);
 
-  if (enc->indent >= enc->json.max_depth)
+  if (enc->indent >= enc->json->max_depth)
     croak (ERR_NESTING_EXCEEDED);
 
   SvGETMAGIC (typesv);
@@ -1105,9 +1105,9 @@ encode_hk (pTHX_ enc_t *enc, char *key, I32 klen)
   encode_str (aTHX_ enc, key, klen < 0 ? -klen : klen, klen < 0);
   encode_ch (aTHX_ enc, '"');
 
-  if (enc->json.flags & F_SPACE_BEFORE) encode_space (aTHX_ enc);
+  if (enc->json->flags & F_SPACE_BEFORE) encode_space (aTHX_ enc);
   encode_ch (aTHX_ enc, ':');
-  if (enc->json.flags & F_SPACE_AFTER ) encode_space (aTHX_ enc);
+  if (enc->json->flags & F_SPACE_AFTER ) encode_space (aTHX_ enc);
 }
 
 /* compare hash entries, used when all keys are bytestrings */
@@ -1142,7 +1142,7 @@ encode_hv (pTHX_ enc_t *enc, HV *hv, SV *typesv)
   HV *typehv = NULL;
   HE *he;
 
-  if (enc->indent >= enc->json.max_depth)
+  if (enc->indent >= enc->json->max_depth)
     croak (ERR_NESTING_EXCEEDED);
 
   SvGETMAGIC (typesv);
@@ -1201,7 +1201,7 @@ encode_hv (pTHX_ enc_t *enc, HV *hv, SV *typesv)
 
   /* for canonical output we have to sort by keys first */
   /* caused by randomised hash orderings */
-  if (enc->json.flags & F_CANONICAL && !SvTIED_mg((SV*)hv, PERL_MAGIC_tied))
+  if (enc->json->flags & F_CANONICAL && !SvTIED_mg((SV*)hv, PERL_MAGIC_tied))
     {
       RITER_T i, count = hv_iterinit (hv);
 
@@ -1358,8 +1358,8 @@ encode_stringify(pTHX_ enc_t *enc, SV *sv, int isref)
   if (isref && SvAMAGIC(sv))
     ;
   /* if no string overload found, check allow_stringify */
-  else if (!MyAMG(sv) && !(enc->json.flags & F_ALLOW_STRINGIFY)) {
-    if (isref && !(enc->json.flags & F_ALLOW_UNKNOWN))
+  else if (!MyAMG(sv) && !(enc->json->flags & F_ALLOW_STRINGIFY)) {
+    if (isref && !(enc->json->flags & F_ALLOW_UNKNOWN))
       croak ("cannot encode reference to scalar '%s' unless the scalar is 0 or 1",
              SvPV_nolen (sv_2mortal (newRV_inc (sv))));
     encode_const_str (aTHX_ enc, "null", 4, 0);
@@ -1403,7 +1403,7 @@ encode_stringify(pTHX_ enc_t *enc, SV *sv, int isref)
     if (SvGMAGICAL(sv)) mg_get(sv);
     if (MyAMG(sv)) { /* force a RV here */
 #if PERL_VERSION > 22
-      U32 flags = enc->json.flags;
+      U32 flags = enc->json->flags;
 #endif
       SV* rv = newRV(SvREFCNT_inc(sv));
 #if PERL_VERSION <= 8
@@ -1413,19 +1413,24 @@ encode_stringify(pTHX_ enc_t *enc, SV *sv, int isref)
         Gv_AMupdate(stash);
       }
 #endif
-      DEBUG_o(Perl_deb(aTHX_
-          "Calling \"\" stringify on %p in Cpanel::JSON::XS::encode\n", sv));
-      SvFLAGS(rv) |= SVf_AMAGIC;
 #if PERL_VERSION > 13
 #  if PERL_VERSION > 22 || defined(USE_CPERL)
       /* #128 protect from endless recursion */
-      enc->json.flags &= ~(F_ALLOW_STRINGIFY|F_CONV_BLESSED);
-#  endif
+      if (enc->json->flags & F_CONV_BLESSED) {
+        DEBUG_o(Perl_deb(aTHX_
+          "Calling \"\" stringify on %p in Cpanel::JSON::XS::encode\n", sv));
+        enc->json->flags &= ~(F_ALLOW_STRINGIFY|F_CONV_BLESSED);
+        pv = AMG_CALLunary(rv, string_amg);
+        enc->json->flags = flags;
+      }
+#  else
+      DEBUG_o(Perl_deb(aTHX_
+          "Calling \"\" stringify on %p in Cpanel::JSON::XS::encode\n", sv));
       pv = AMG_CALLunary(rv, string_amg);
-#  if PERL_VERSION > 22
-      enc->json.flags = flags;
 #  endif
 #else
+      DEBUG_o(Perl_deb(aTHX_
+          "Calling \"\" stringify on %p in Cpanel::JSON::XS::encode\n", sv));
       pv = AMG_CALLun(rv, string);
 #endif
       TAINT_IF(pv && SvTAINTED(pv));
@@ -1442,7 +1447,7 @@ encode_stringify(pTHX_ enc_t *enc, SV *sv, int isref)
   }
   /* if ALLOW_BIGNUM and Math::Big* and NaN => according to stringify_infnan */
   if (UNLIKELY(
-        (enc->json.flags & F_ALLOW_BIGNUM)
+        (enc->json->flags & F_ALLOW_BIGNUM)
         && str
         && SvROK(sv)
         && (memEQc(str, "NaN") || memEQc(str, "nan") ||
@@ -1453,11 +1458,11 @@ encode_stringify(pTHX_ enc_t *enc, SV *sv, int isref)
         && ((stash == gv_stashpvn ("Math::BigInt", sizeof("Math::BigInt")-1, 0)) ||
             (stash == gv_stashpvn ("Math::BigFloat", sizeof("Math::BigFloat")-1, 0))))
     {
-      if (enc->json.infnan_mode == 0) {
+      if (enc->json->infnan_mode == 0) {
         encode_const_str (aTHX_ enc, "null", 4, 0);
         if (pv) SvREFCNT_dec(pv);
         return;
-      } else if (enc->json.infnan_mode == 3) {
+      } else if (enc->json->infnan_mode == 3) {
         if (memEQc(str, "NaN") || memEQc(str, "nan"))
           encode_const_str (aTHX_ enc, "nan", 3, 0);
         else if (memEQc(str, "inf"))
@@ -1502,7 +1507,7 @@ encode_bool_obj (pTHX_ enc_t *enc, SV *sv, int force_conversion, int as_string)
       if (as_string)
         encode_ch (aTHX_ enc, '"');
     }
-  else if (force_conversion && enc->json.flags & F_CONV_BLESSED)
+  else if (force_conversion && enc->json->flags & F_CONV_BLESSED)
     {
       if (as_string)
         encode_ch (aTHX_ enc, '"');
@@ -1551,7 +1556,7 @@ encode_rv (pTHX_ enc_t *enc, SV *rv)
     if (!encode_bool_obj (aTHX_ enc, sv, 0, 0))
     {
       HV *stash = SvSTASH (sv);
-      if ((enc->json.flags & F_ALLOW_TAGS)
+      if ((enc->json->flags & F_ALLOW_TAGS)
             && (method = gv_fetchmethod_autoload (stash, "FREEZE", 0)))
         {
           dMY_CXT;
@@ -1596,7 +1601,7 @@ encode_rv (pTHX_ enc_t *enc, SV *rv)
 
           FREETMPS; LEAVE;
         }
-      else if ((enc->json.flags & F_CONV_BLESSED)
+      else if ((enc->json->flags & F_CONV_BLESSED)
             && (method = gv_fetchmethod_autoload (stash, "TO_JSON", 0)))
         {
           dSP;
@@ -1621,14 +1626,14 @@ encode_rv (pTHX_ enc_t *enc, SV *rv)
 
           FREETMPS; LEAVE;
         }
-      else if ((enc->json.flags & F_ALLOW_BIGNUM)
+      else if ((enc->json->flags & F_ALLOW_BIGNUM)
                && stash
                && ((stash == gv_stashpvn ("Math::BigInt", sizeof("Math::BigInt")-1, 0))
                 || (stash == gv_stashpvn ("Math::BigFloat", sizeof("Math::BigFloat")-1, 0))))
         encode_stringify(aTHX_ enc, rv, 1);
-      else if (enc->json.flags & F_CONV_BLESSED)
-        encode_stringify(aTHX_ enc, sv, 0);
-      else if (enc->json.flags & F_ALLOW_BLESSED)
+      else if (enc->json->flags & F_CONV_BLESSED)
+        encode_stringify(aTHX_ enc, rv, 1);
+      else if (enc->json->flags & F_ALLOW_BLESSED)
         encode_const_str (aTHX_ enc, "null", 4, 0);
       else
         croak ("encountered object '%s', but neither allow_blessed, convert_blessed nor allow_tags settings are enabled (or TO_JSON/FREEZE method missing)",
@@ -1639,16 +1644,16 @@ encode_rv (pTHX_ enc_t *enc, SV *rv)
     {
       if (!encode_bool_ref (aTHX_ enc, sv))
       {
-      if (enc->json.flags & F_ALLOW_STRINGIFY)
+      if (enc->json->flags & F_ALLOW_STRINGIFY)
         encode_stringify(aTHX_ enc, sv, SvROK(sv));
-      else if (enc->json.flags & F_ALLOW_UNKNOWN)
+      else if (enc->json->flags & F_ALLOW_UNKNOWN)
         encode_const_str (aTHX_ enc, "null", 4, 0);
       else
         croak ("cannot encode reference to scalar '%s' unless the scalar is 0 or 1",
                SvPV_nolen (sv_2mortal (newRV_inc (sv))));
       }
     }
-  else if (enc->json.flags & F_ALLOW_UNKNOWN)
+  else if (enc->json->flags & F_ALLOW_UNKNOWN)
     encode_const_str (aTHX_ enc, "null", 4, 0);
   else
     croak ("encountered %s, but JSON can only represent references to arrays or hashes",
@@ -1785,9 +1790,9 @@ encode_sv (pTHX_ enc_t *enc, SV *sv, SV *typesv)
   else
     {
       if (UNLIKELY (sv == &PL_sv_yes || sv == &PL_sv_no)) type = JSON_TYPE_BOOL;
+      else if (SvPOKp (sv)) type = JSON_TYPE_STRING;
       else if (SvNOKp (sv)) type = JSON_TYPE_FLOAT;
       else if (SvIOKp (sv)) type = JSON_TYPE_INT;
-      else if (SvPOKp (sv)) type = JSON_TYPE_STRING;
       else if (SvROK (sv)) process_ref = 1;
       else if (!SvOK (sv)) can_be_null = 1;
     }
@@ -1816,7 +1821,7 @@ encode_sv (pTHX_ enc_t *enc, SV *sv, SV *typesv)
 
 #if defined(HAVE_ISINF) && defined(HAVE_ISNAN)
       /* With no stringify_infnan we can skip the conversion, returning null. */
-      if (enc->json.infnan_mode == 0) {
+      if (enc->json->infnan_mode == 0) {
 # if defined(USE_QUADMATH) && defined(HAVE_ISINFL) && defined(HAVE_ISNANL)
         if (UNLIKELY(isinfl(nv) || isnanl(nv)))
 # else
@@ -1930,17 +1935,17 @@ encode_sv (pTHX_ enc_t *enc, SV *sv, SV *typesv)
 #if defined(HAVE_ISINF) && defined(HAVE_ISNAN)
       is_inf_or_nan:
 #endif
-        if (enc->json.infnan_mode == 0) {
+        if (enc->json->infnan_mode == 0) {
           strncpy(enc->cur, "null\0", 5);
         }
-        else if (enc->json.infnan_mode == 1) {
+        else if (enc->json->infnan_mode == 1) {
           const int l = strlen(enc->cur);
           memmove(enc->cur+1, enc->cur, l);
           *enc->cur = '"';
           *(enc->cur + l+1) = '"';
           *(enc->cur + l+2) = 0;
         }
-        else if (enc->json.infnan_mode == 3) {
+        else if (enc->json->infnan_mode == 3) {
           if (inf_or_nan == 1)
             strncpy(enc->cur, "\"inf\"\0", 6);
           else if (inf_or_nan == 2)
@@ -1948,9 +1953,9 @@ encode_sv (pTHX_ enc_t *enc, SV *sv, SV *typesv)
           else if (inf_or_nan == 3)
             strncpy(enc->cur, "\"nan\"\0", 6);
         }
-        else if (enc->json.infnan_mode != 2) {
+        else if (enc->json->infnan_mode != 2) {
           croak ("invalid stringify_infnan mode %c. Must be 0, 1, 2 or 3",
-                 enc->json.infnan_mode);
+                 enc->json->infnan_mode);
         }
       }
       if (!force_conversion && SvPOKp (sv) && !strEQ(enc->cur, SvPVX (sv))) {
@@ -2110,7 +2115,7 @@ encode_sv (pTHX_ enc_t *enc, SV *sv, SV *typesv)
     }
   else if (process_ref)
     encode_rv (aTHX_ enc, sv);
-  else if (enc->json.flags & F_ALLOW_UNKNOWN)
+  else if (enc->json->flags & F_ALLOW_UNKNOWN)
     encode_const_str (aTHX_ enc, "null", 4, 0);
   else
     croak ("encountered perl type (%s,0x%x) that JSON cannot handle, check your input data",
@@ -2125,15 +2130,15 @@ encode_json (pTHX_ SV *scalar, JSON *json, SV *typesv)
   if (!(json->flags & F_ALLOW_NONREF) && json_nonref (aTHX_ scalar))
     croak ("hash- or arrayref expected (not a simple scalar, use allow_nonref to allow this)");
 
-  enc.json      = *json;
+  enc.json      = json;
   enc.sv        = sv_2mortal (NEWSV (0, INIT_SIZE));
   enc.cur       = SvPVX (enc.sv);
   enc.end       = SvEND (enc.sv);
   enc.indent    = 0;
-  enc.limit     = enc.json.flags & F_ASCII  ? 0x000080UL
-                : enc.json.flags & F_BINARY ? 0x000080UL
-                : enc.json.flags & F_LATIN1 ? 0x000100UL
-                                            : 0x110000UL;
+  enc.limit     = json->flags & F_ASCII  ? 0x000080UL
+                : json->flags & F_BINARY ? 0x000080UL
+                : json->flags & F_LATIN1 ? 0x000100UL
+                                         : 0x110000UL;
 
   SvPOK_only (enc.sv);
   encode_sv (aTHX_ &enc, scalar, typesv);
@@ -2142,10 +2147,10 @@ encode_json (pTHX_ SV *scalar, JSON *json, SV *typesv)
   SvCUR_set (enc.sv, enc.cur - SvPVX (enc.sv));
   *SvEND (enc.sv) = 0; /* many xs functions expect a trailing 0 for text strings */
 
-  if (!(enc.json.flags & (F_ASCII | F_LATIN1 | F_BINARY | F_UTF8)))
+  if (!(json->flags & (F_ASCII | F_LATIN1 | F_BINARY | F_UTF8)))
     SvUTF8_on (enc.sv);
 
-  if (enc.json.flags & F_SHRINK)
+  if (json->flags & F_SHRINK)
     shrink (aTHX_ enc.sv);
 
   return enc.sv;
