@@ -699,8 +699,9 @@ OBJECT-ORIENTED INTERFACE
         If $enable is true (or missing), then "encode" will stringify the
         non-object perl value or reference. Note that blessed objects are
         not included here and are handled separately by "allow_blessed" and
-        "convert_blessed". String references are stringified to the string
-        value, other references as in perl.
+        "convert_blessed", also stringify overloaded objects. String
+        references are stringified to the string value, other references as
+        in perl.
 
         This option does not affect "decode" in any way.
 
@@ -757,11 +758,12 @@ OBJECT-ORIENTED INTERFACE
 
         The "TO_JSON" method may safely call die if it wants. If "TO_JSON"
         returns other blessed objects, those will be handled in the same
-        way. "TO_JSON" must take care of not causing an endless recursion
-        cycle (== crash) in this case. The name of "TO_JSON" was chosen
-        because other methods called by the Perl core (== not by the user of
-        the object) are usually in upper case letters and to avoid
-        collisions with any "to_json" function or method.
+        way. "TO_JSON" and a stringify overload must take care of not
+        causing an endless recursion cycle, i.e. a deep recursion crash in
+        this case. The name of "TO_JSON" was chosen because other methods
+        called by the Perl core (== not by the user of the object) are
+        usually in upper case letters and to avoid collisions with any
+        "to_json" function or method.
 
         If $enable is false (the default), then "encode" will not consider
         this type of conversion.
